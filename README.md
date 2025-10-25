@@ -7,13 +7,15 @@ A voice-activated Uber booking application for the Omi device with full 2FA supp
 ## Features
 
 ✅ **Voice-Activated Booking** - Say "Book an Uber to [destination]" and ride is booked automatically
+✅ **Sliding Window Segment Collection** - Collects voice segments for 5 seconds of silence before processing
+✅ **LLM-Powered Destination Extraction** - Corrects spelling mistakes, ignores generic terms (Current Location, Office, Home)
 ✅ **One-Time Authentication** - Authenticate once, never login again
-✅ **2FA Support** - Handles SMS/authenticator app verification seamlessly
 ✅ **Session Persistence** - Saves authenticated session for future bookings
 ✅ **Browser Automation** - Uses Playwright to automate Uber booking
-✅ **Mobile-Optimized UI** - Beautiful responsive design for all devices
+✅ **Screenshot Capture** - Captures screenshots at each booking step in `/snapshots` folder
 ✅ **Real-Time Status** - Live authentication status updates
 ✅ **Error Handling** - Graceful error messages and recovery
+✅ **Login Detection** - Warns if login button detected (authentication issue)
 
 ## Tech Stack
 
@@ -174,26 +176,51 @@ Check if user has completed authentication setup.
 ### POST `/webhook`
 Receive voice transcripts from Omi and book rides.
 
+**Behavior:**
+- Collects segments for 5 seconds of silence (sliding window)
+- Each new segment restarts the 5-second countdown
+- After 5 seconds of silence, processes all collected segments
+- Validates user is authenticated before booking
+- Extracts locations using LLM (ignores spelling mistakes)
+- Automatically books ride if valid locations detected
+
 **Request Body:**
 ```json
 {
-  "uid": "user123",
   "segments": [
     {
-      "text": "book an uber to san francisco airport",
+      "text": "book an uber",
       "speaker": "user"
     }
   ]
 }
 ```
 
+**Note:** `uid` is ignored - always uses `default_user`
+
 **Response:**
 ```json
 {
-  "message": "🚗 Booking Uber to San Francisco Airport...",
-  "booked": true,
-  "destination": "San Francisco Airport"
+  "message": "📝 Received 1 segment(s). Processing in 5s...",
+  "booked": false,
+  "batching": true
 }
+```
+
+**Example Flow:**
+```bash
+# Segment 1 at t=0
+curl -X POST "http://localhost:8000/webhook" \
+  -H "Content-Type: application/json" \
+  -d '{"segments": [{"text": "Book an Uber", "speaker": "user"}]}'
+
+# Segment 2 at t=2 (timer restarts to t=7)
+curl -X POST "http://localhost:8000/webhook" \
+  -H "Content-Type: application/json" \
+  -d '{"segments": [{"text": "from SJSU to Cal Train Station", "speaker": "user"}]}'
+
+# Wait 5 seconds → processes at t=7
+# Result: Joins segments, validates with LLM, books ride
 ```
 
 ---
@@ -266,20 +293,57 @@ The app detects 2FA prompts by looking for:
 - Code validation: 4-8 digit format
 - Session encryption: Saved as JSON with cookies
 
-## Voice Trigger Detection
+## Voice Segment Collection
 
-### Supported Phrases
+### Sliding Window Logic
+The webhook uses a **sliding window** to collect voice segments:
+
+1. **First segment arrives** → Create bucket, start monitoring task
+2. **New segments arrive** → Add to bucket, update last arrival time
+3. **Monitor checks every 500ms** → When 5 seconds pass since last segment, process
+4. **Processing** → Join all segments, validate with LLM, extract locations, book ride
+
+**Example Timeline:**
+```
+t=0s: Segment 1 arrives ("Book an Uber")
+      → Last arrival = 0s, waiting until 5s
+
+t=2s: Segment 2 arrives ("from SJSU to Cal Train")
+      → Last arrival = 2s, waiting until 7s
+
+t=7s: 5 seconds of silence detected
+      → Process: "Book an Uber from SJSU to Cal Train"
+      → Extract: SJSU → Cal Train
+      → Book ride
+```
+
+### Destination Extraction
+
+**LLM Validation Rules:**
+- ✅ Extracts actual location names (SJSU, Cal Train Station, Downtown)
+- ✅ Corrects spelling mistakes (SJS → SJSU, Cal Trane → Cal Train)
+- ❌ Rejects generic terms (Current Location, Office, Home, My Place, Work)
+- ✅ Returns both start and end locations
+- ✅ Handles single location (uses as end location only)
+
+**Supported Phrases:**
 - "Book an Uber to [destination]"
 - "Get me a ride to [destination]"
 - "Call an Uber to [destination]"
 - "Request an Uber to [destination]"
 - "Order an Uber to [destination]"
 
-### Destination Extraction
-- Uses OpenAI GPT-3.5-turbo
-- Handles variations: "SFO", "San Francisco Airport", "the airport"
-- Cleans up filler words: "um", "uh", etc.
-- Returns clean destination name
+**Example Inputs:**
+```
+Input: "Book an Uber from SJS to Cal Trane Station"
+Output: SJSU → Cal Train Station
+
+Input: "Book an Uber from my office to downtown"
+Output: ❌ Rejected (generic terms)
+
+Input: "Book an Uber to the airport"
+Output: ✅ Extracted (airport is a valid location)
+```
 
 ## Deployment
 
@@ -326,6 +390,31 @@ docker build -t omi-uber-app .
 docker run -p 8000:8000 -e OPENAI_API_KEY=your_key omi-uber-app
 ```
 
+## Booking Screenshots
+
+The system captures screenshots at each step of the booking process and stores them in the `/snapshots` folder.
+
+### Screenshot Sequence
+```
+snapshots/
+  └── default_user/
+      ├── 01_pickup_filled.png          # After entering pickup location
+      ├── 02_pickup_selected.png        # After selecting pickup suggestion
+      ├── 03_dropoff_filled.png         # After entering dropoff location
+      ├── 04_dropoff_selected.png       # After selecting dropoff suggestion
+      ├── 05_ride_details.png           # Ride details page
+      ├── 06_ride_options.png           # Available ride options
+      ├── 07_ride_selected.png          # After selecting a ride
+      └── 08_booking_confirmation.png   # After clicking request button
+```
+
+### Usage
+Screenshots are automatically captured during each booking. Use them for:
+- Debugging booking issues
+- Verifying automation steps
+- Monitoring ride selection
+- Confirming successful bookings
+
 ## File Storage
 
 ### User Data
@@ -337,6 +426,11 @@ docker run -p 8000:8000 -e OPENAI_API_KEY=your_key omi-uber-app
 - Location: `sessions/{uid}_uber_session.json`
 - Contains: Cookies, localStorage, session state
 - Format: Playwright storage state
+
+### Screenshots
+- Location: `snapshots/{uid}/`
+- Contains: Step-by-step booking process images
+- Format: PNG images
 
 ## Error Handling
 
