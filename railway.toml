@@ -1,0 +1,13 @@
+[build]
+builder = "nixpacks"
+
+[build.nixpacks]
+providers = ["python"]
+
+[deploy]
+startCommand = "playwright install chromium && uvicorn main:app --host 0.0.0.0 --port $PORT"
+restartPolicyMaxRetries = 5
+
+[env]
+PLAYWRIGHT_BROWSERS_PATH = "/app/.cache/ms-playwright"
+PORT = "8000"
