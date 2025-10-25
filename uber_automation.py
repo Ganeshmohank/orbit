@@ -1,12 +1,36 @@
 import asyncio
+import os
 from typing import Optional, Tuple
 from playwright.async_api import async_playwright
 from simple_storage import load_session, record_booking
 from browser_pool import browser_pool
 
+# Create snapshots folder if it doesn't exist
+SNAPSHOTS_DIR = "snapshots"
+if not os.path.exists(SNAPSHOTS_DIR):
+    os.makedirs(SNAPSHOTS_DIR)
+    print(f"📁 Created {SNAPSHOTS_DIR} folder")
+
 
 class UberAutomation:
     """Handles automated Uber ride booking using Playwright."""
+    
+    async def _capture_screenshot(self, page, uid: str, step_name: str):
+        """Capture and save screenshot to snapshots folder."""
+        try:
+            # Create user-specific folder
+            user_snapshots_dir = os.path.join(SNAPSHOTS_DIR, uid)
+            if not os.path.exists(user_snapshots_dir):
+                os.makedirs(user_snapshots_dir)
+            
+            # Save screenshot with step name
+            screenshot_path = os.path.join(user_snapshots_dir, f"{step_name}.png")
+            await page.screenshot(path=screenshot_path)
+            print(f"📸 Screenshot saved: {screenshot_path}")
+            return screenshot_path
+        except Exception as e:
+            print(f"⚠️ Error capturing screenshot: {e}")
+            return None
 
     async def book_ride(self, uid: str, start_location: str, end_location: str, auto_request: bool = False) -> Tuple[bool, str, Optional[str], Optional[str]]:
         """
@@ -84,6 +108,7 @@ class UberAutomation:
             await asyncio.sleep(1)  # Wait before typing
             await pickup_input.fill(start_location)
             await asyncio.sleep(2)  # Wait for autocomplete
+            await self._capture_screenshot(page, uid, "01_pickup_filled")
 
             # Wait for autocomplete suggestions and click the list item
             print("Waiting for pickup suggestions...")
@@ -107,6 +132,7 @@ class UberAutomation:
                     print("Clicking first pickup suggestion item via JavaScript...")
                     await first_item.evaluate("el => el.click()")
                     await asyncio.sleep(2)
+                    await self._capture_screenshot(page, uid, "02_pickup_selected")
                 else:
                     print("⚠️ No suggestion items found")
             except Exception as e:
@@ -151,6 +177,7 @@ class UberAutomation:
                 # Just fill directly without clicking (like pickup)
                 await dropoff_input.fill(end_location)
                 await asyncio.sleep(2)  # Wait for autocomplete
+                await self._capture_screenshot(page, uid, "03_dropoff_filled")
 
                 # Wait for autocomplete and select first suggestion
                 print("Waiting for dropoff suggestions...")
@@ -174,6 +201,7 @@ class UberAutomation:
                         print("Clicking first dropoff suggestion item via JavaScript...")
                         await first_item.evaluate("el => el.click()")
                         await asyncio.sleep(2)
+                        await self._capture_screenshot(page, uid, "04_dropoff_selected")
                     else:
                         print("⚠️ No dropoff suggestion items found")
                 except Exception as e:
@@ -183,10 +211,7 @@ class UberAutomation:
 
             # Wait for ride details to load
             await asyncio.sleep(2)
-            
-            # Take screenshot to see current state
-            await page.screenshot(path="ride_details.png")
-            print("Screenshot saved to ride_details.png")
+            await self._capture_screenshot(page, uid, "05_ride_details")
 
             # Look for "See prices" button
             print("Looking for 'See prices' button...")
@@ -231,9 +256,7 @@ class UberAutomation:
                     print("⚠️ Prices not found, waiting 3 more seconds...")
                     await asyncio.sleep(3)
                 
-                # Take screenshot of ride options
-                await page.screenshot(path="ride_options.png")
-                print("Screenshot saved to ride_options.png")
+                await self._capture_screenshot(page, uid, "06_ride_options")
                 
                 # Look for "Request" or available ride options
                 print(f"auto_request flag: {auto_request}")
@@ -279,6 +302,7 @@ class UberAutomation:
                             print(f"Clicking ride option: {option_text}")
                             await first_option.evaluate("el => el.click()")
                             await asyncio.sleep(2)
+                            await self._capture_screenshot(page, uid, "07_ride_selected")
                         else:
                             print("⚠️ No ride options found, proceeding to request button")
                     except Exception as e:
@@ -305,6 +329,8 @@ class UberAutomation:
                             print(f"🚗 Clicking Request button: {btn_text}")
                             await request_btn.evaluate("el => el.click()")
                             await asyncio.sleep(3)
+                            await self._capture_screenshot(page, uid, "08_booking_confirmation")
+                            
                             print("✅ Ride booked successfully!")
                             return True, f"✅ Ride booked! From {start_location} to {end_location}.", None, None
                         except Exception as e:

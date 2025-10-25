@@ -8,11 +8,12 @@ client = OpenAI()
 def is_trigger_phrase(text: str) -> bool:
     """Check if text contains Uber booking trigger phrases."""
     patterns = [
-        r"book\s+(?:an?\s+)?uber",
-        r"get\s+(?:me\s+)?a\s+ride",
-        r"call\s+(?:an?\s+)?uber",
+        r"book\s+(?:me\s+)?(?:an?\s+)?uber",
+        r"get\s+(?:me\s+)?(?:an?\s+)?(?:uber\s+)?ride",
+        r"call\s+(?:me\s+)?(?:an?\s+)?uber",
         r"request\s+(?:an?\s+)?uber",
         r"order\s+(?:an?\s+)?uber",
+        r"uber\s+(?:ride|from)",
     ]
 
     text_lower = text.lower()
@@ -25,10 +26,14 @@ def is_trigger_phrase(text: str) -> bool:
 def extract_destinations(text: str) -> tuple[Optional[str], Optional[str]]:
     """Extract start and end locations from voice text using OpenAI."""
     try:
-        prompt = f"""Extract the start location and end location from this voice command. 
-Return ONLY two locations separated by a pipe (|). Format: START_LOCATION|END_LOCATION
-If only one location is mentioned, use it as the end location and return "Current Location|END_LOCATION"
-If no locations are mentioned, return "NOT_FOUND|NOT_FOUND"
+        prompt = f"""Extract the start location and end location from this voice command.
+IMPORTANT RULES:
+1. Return ONLY actual location names (e.g., "SJSU", "Cal Train Station", "Downtown")
+2. NEVER return "Current Location", "Office", "Home", or similar generic terms
+3. Ignore spelling mistakes but keep the location name as spoken (e.g., "SJS" → "SJSU", "Cal Trane" → "Cal Train")
+4. Return format: START_LOCATION|END_LOCATION
+5. If only one location is mentioned, return "NOT_FOUND|END_LOCATION"
+6. If no valid locations are mentioned, return "NOT_FOUND|NOT_FOUND"
 
 Voice command: "{text}"
 
@@ -44,13 +49,28 @@ Locations:"""
         result = response.choices[0].message.content.strip()
 
         if "NOT_FOUND" in result.upper():
+            parts = result.split("|")
+            if len(parts) == 2:
+                start = parts[0].strip()
+                end = parts[1].strip()
+                if start == "NOT_FOUND" and end != "NOT_FOUND":
+                    return None, end
+                if end == "NOT_FOUND":
+                    return None, None
             return None, None
 
         parts = result.split("|")
         if len(parts) == 2:
             start = parts[0].strip()
             end = parts[1].strip()
-            return start, end
+            
+            # Validate that we have actual location names, not generic terms
+            generic_terms = ["current location", "office", "home", "my place", "work"]
+            if start.lower() in generic_terms or end.lower() in generic_terms:
+                return None, None
+            
+            if start and end:
+                return start, end
 
         return None, None
 

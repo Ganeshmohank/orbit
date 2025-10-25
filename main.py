@@ -1,9 +1,10 @@
 import os
 import asyncio
 import time
+import json
 from typing import Optional
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -30,6 +31,15 @@ app = FastAPI(title="Omi Uber App", version="1.0.0")
 # Rate limiting to prevent bombarding Uber
 last_booking_time = {}
 MIN_BOOKING_INTERVAL = 30  # Minimum 30 seconds between bookings per user
+
+# Active bookings - only 1 per user
+active_bookings = {}  # {uid: bool}
+
+# Segment buckets for collecting voice data
+segment_buckets = {}  # {uid: [segments]}
+segment_last_arrival = {}  # {uid: timestamp of last segment}
+bucket_timers = {}  # {uid: asyncio.Task}
+BUCKET_WAIT_TIME = 5  # Wait 5 seconds from last segment before processing
 
 # Models
 class VoiceSegment(BaseModel):
@@ -651,66 +661,211 @@ async def setup_completed(uid: str):
 # ============================================================================
 
 
+async def _process_booking(uid: str, segments: list, background_tasks: BackgroundTasks):
+    """Process booking immediately when trigger is detected."""
+    # Join all segment texts
+    combined_text = " ".join([seg.get("text", "") if isinstance(seg, dict) else seg.text for seg in segments])
+    logger.info(f"✅ Joined text: '{combined_text}'")
+    
+    # Detect trigger phrase and extract locations
+    is_trigger, start_location, end_location = detect_trigger_and_destinations(segments)
+    
+    if not is_trigger:
+        logger.info(f"❌ No trigger phrase detected for {uid}")
+        active_bookings[uid] = False
+        return
+    
+    logger.info(f"✅ LLM validation passed for {uid}: {start_location} → {end_location}")
+    
+    if not start_location or not end_location:
+        logger.warning(f"⚠️ Could not extract locations for {uid}")
+        active_bookings[uid] = False
+        return
+    
+    # Validate session
+    user_data = load_user_data(uid)
+    if not user_data.get("uber_authenticated"):
+        logger.warning(f"⚠️ User {uid} not authenticated")
+        active_bookings[uid] = False
+        return
+    
+    # Check rate limiting
+    current_time = time.time()
+    if uid in last_booking_time:
+        time_since_last = current_time - last_booking_time[uid]
+        if time_since_last < MIN_BOOKING_INTERVAL:
+            logger.info(f"⏱️ Rate limited for {uid}")
+            active_bookings[uid] = False
+            return
+    
+    # Record booking time
+    last_booking_time[uid] = current_time
+    
+    logger.info(f"🔒 Booking marked as ACTIVE for {uid} (LLM validated)")
+    
+    # Book ride in background
+    background_tasks.add_task(
+        _book_ride_background,
+        uid,
+        start_location,
+        end_location,
+    )
+    logger.info(f"🚗 Starting booking immediately for {uid}: {start_location} → {end_location}")
+
+
+async def _process_bucket_delayed(uid: str):
+    """
+    Keep checking if 5 seconds have passed since last segment.
+    Only process when 5 seconds of silence detected.
+    """
+    logger.info(f"⏳ Monitoring bucket for {uid}")
+    
+    while True:
+        await asyncio.sleep(0.5)  # Check every 500ms
+        
+        # If bucket was cleared, we're done
+        if uid not in segment_buckets:
+            logger.info(f"✅ Bucket for {uid} already processed")
+            return
+        
+        # Check if 5 seconds have passed since last segment
+        last_arrival = segment_last_arrival.get(uid, time.time())
+        time_since_last = time.time() - last_arrival
+        
+        if time_since_last >= BUCKET_WAIT_TIME:
+            # 5 seconds of silence detected, process now
+            logger.info(f"✅ 5 seconds of silence detected for {uid}")
+            break
+    
+    # Get segments before clearing
+    if uid not in segment_buckets:
+        return
+    
+    segments = segment_buckets[uid]
+    logger.info(f"🔄 Processing bucket for {uid} with {len(segments)} segment(s)")
+    
+    # Clear bucket and timer
+    del segment_buckets[uid]
+    if uid in segment_last_arrival:
+        del segment_last_arrival[uid]
+    if uid in bucket_timers:
+        del bucket_timers[uid]
+    logger.info(f"🗑️ Cleared bucket for {uid}")
+    
+    # Join all segment texts
+    combined_text = " ".join([seg.get("text", "") if isinstance(seg, dict) else seg.text for seg in segments])
+    logger.info(f"✅ Joined text: '{combined_text}'")
+    
+    # Detect trigger phrase and extract locations
+    is_trigger, start_location, end_location = detect_trigger_and_destinations(segments)
+    
+    if not is_trigger:
+        logger.info(f"❌ No trigger phrase detected for {uid}")
+        return
+    
+    logger.info(f"✅ LLM validation passed for {uid}: {start_location} → {end_location}")
+    
+    if not start_location or not end_location:
+        logger.warning(f"⚠️ Could not extract locations for {uid}")
+        return
+    
+    # Validate session
+    user_data = load_user_data(uid)
+    if not user_data.get("uber_authenticated"):
+        logger.warning(f"⚠️ User {uid} not authenticated")
+        return
+    
+    # Check rate limiting
+    current_time = time.time()
+    if uid in last_booking_time:
+        time_since_last = current_time - last_booking_time[uid]
+        if time_since_last < MIN_BOOKING_INTERVAL:
+            logger.info(f"⏱️ Rate limited for {uid}")
+            return
+    
+    # Record booking time
+    last_booking_time[uid] = current_time
+    
+    logger.info(f"🔒 Booking marked as ACTIVE for {uid} (LLM validated)")
+    logger.info(f"🚗 Starting booking immediately for {uid}: {start_location} → {end_location}")
+    
+    # Book ride directly (no background task)
+    success, message, driver, eta = await uber_automation.book_ride(
+        uid, start_location, end_location, auto_request=True
+    )
+    
+    # Check if login button was found (indicates authentication issue)
+    if "login button" in message.lower() or "not authenticated" in message.lower():
+        logger.warning(f"⚠️ FOUND LOGIN BUTTON IN DOM - User {uid} may not be authenticated!")
+        logger.warning(f"⚠️ Please visit: http://localhost:8000/auth?uid={uid} to re-authenticate")
+    
+    logger.info(f"📊 Booking result for {uid}: success={success}, message={message}, driver={driver}, eta={eta}")
+    
+    # Mark booking as inactive
+    active_bookings[uid] = False
+    logger.info(f"🔓 Marking booking as inactive for {uid}")
+
+
 @app.post("/webhook")
-async def webhook(request: WebhookRequest, background_tasks: BackgroundTasks):
+async def webhook(request: Request):
     """
     Receive voice transcripts from Omi.
-    Detect trigger phrase and book ride if start/end locations are found.
+    Collect segments for 5 seconds, then process if trigger detected.
+    Always uses default_user.
     """
     try:
-        uid = request.uid
-        segments = request.segments
-
-        # Rate limiting: prevent rapid-fire booking requests
-        current_time = time.time()
-        if uid in last_booking_time:
-            time_since_last = current_time - last_booking_time[uid]
-            if time_since_last < MIN_BOOKING_INTERVAL:
-                wait_time = int(MIN_BOOKING_INTERVAL - time_since_last)
-                return {
-                    "message": f"⏱️ Please wait {wait_time}s before booking another ride",
-                    "booked": False,
-                }
+        # Handle both Pydantic model and raw JSON/streaming data
+        try:
+            body = await request.json()
+        except:
+            body = await request.body()
+            if isinstance(body, bytes):
+                body = json.loads(body.decode())
         
-        # Detect trigger phrase and extract start/end locations
-        is_trigger, start_location, end_location = detect_trigger_and_destinations(segments)
-
-        if not is_trigger:
+        # Always use default_user
+        uid = "default_user"
+        segments = body.get("segments", [])
+        
+        if not segments:
+            logger.error("❌ No segments provided in request")
             return {
-                "message": "No trigger phrase detected",
+                "message": "❌ Missing segments",
                 "booked": False,
             }
-
-        if not start_location or not end_location:
-            return {
-                "message": "⚠️ Could not extract start and end locations from voice command",
-                "booked": False,
-            }
-
-        # Validate session before booking
-        user_data = load_user_data(uid)
-        if not user_data.get("uber_authenticated"):
-            return {
-                "message": "⚠️ Please authenticate your Uber account first",
-                "booked": False,
-            }
-
-        # Record booking time
-        last_booking_time[uid] = current_time
-
-        # Book ride in background
-        background_tasks.add_task(
-            _book_ride_background,
-            uid,
-            start_location,
-            end_location,
-        )
-
+        
+        # Convert dict segments to proper format if needed
+        if segments and isinstance(segments[0], dict):
+            segments = [{"text": s.get("text", ""), "speaker": s.get("speaker", "")} for s in segments]
+        
+        logger.info(f"📥 Webhook received for uid={uid}")
+        logger.info(f"📊 Payload: {len(segments)} segment(s)")
+        for i, seg in enumerate(segments, 1):
+            text = seg.get("text", "") if isinstance(seg, dict) else seg.text
+            speaker = seg.get("speaker", "") if isinstance(seg, dict) else seg.speaker
+            logger.info(f"  Segment {i}: speaker='{speaker}', text='{text}'")
+        
+        # Initialize bucket if needed
+        if uid not in segment_buckets:
+            segment_buckets[uid] = []
+            logger.info(f"🆕 Creating new bucket for {uid}")
+            # Start monitoring task on first segment
+            task = asyncio.create_task(_process_bucket_delayed(uid))
+            bucket_timers[uid] = task
+            logger.info(f"🔄 Started monitoring task for {uid}")
+        
+        # Add segments to bucket
+        segment_buckets[uid].extend(segments)
+        logger.info(f"✅ Added {len(segments)} segment(s) to bucket")
+        logger.info(f"📊 Bucket now has {len(segment_buckets[uid])} total segment(s)")
+        
+        # Update last arrival time (sliding window)
+        segment_last_arrival[uid] = time.time()
+        logger.info(f"⏱️ Last segment at {segment_last_arrival[uid]}, waiting {BUCKET_WAIT_TIME}s from now...")
+        
         return {
-            "message": f"🚗 Booking Uber from {start_location} to {end_location}...",
-            "booked": True,
-            "start_location": start_location,
-            "end_location": end_location,
+            "message": f"📝 Received {len(segments)} segment(s). Processing in {BUCKET_WAIT_TIME}s...",
+            "booked": False,
+            "batching": True,
         }
 
     except Exception as e:
