@@ -15,7 +15,7 @@ load_dotenv()
 
 from auth_manager import auth_manager, active_browsers
 from uber_automation import uber_automation
-from ride_detector import detect_trigger_and_destinations
+from ride_detector import detect_trigger_and_destinations, get_pickup_location_from_ip
 from simple_storage import (
     load_user_data,
     update_user_status,
@@ -765,6 +765,30 @@ async def _process_bucket_delayed(uid: str):
     
     logger.info(f"✅ LLM validation passed for {uid}: {start_location} → {end_location}")
     
+    # If only destination provided, get pickup from user's current location
+    if not start_location and end_location:
+        logger.info(f"📍 Only destination provided, getting pickup from user's location...")
+        # Get GPS coordinates from stored bucket data
+        gps_lat = segment_buckets.get(f"{uid}_gps_lat")
+        gps_lon = segment_buckets.get(f"{uid}_gps_lon")
+        
+        if gps_lat and gps_lon:
+            logger.info(f"📍 Using GPS coordinates: ({gps_lat}, {gps_lon})")
+        else:
+            logger.info(f"📍 No GPS provided, using San Francisco fallback")
+        
+        logger.info(f"🔄 Starting geolocation process...")
+        logger.info(f"   1️⃣ Getting landmark...")
+        start_location = await get_pickup_location_from_ip(None, gps_lat, gps_lon)
+        if start_location:
+            logger.info(f"✅ Got pickup location: {start_location}")
+            logger.info(f"📍 Pickup location determined: {start_location}")
+            logger.info(f"🎯 Final booking route: {start_location} → {end_location}")
+        else:
+            logger.warning(f"⚠️ Could not get pickup location")
+            logger.warning(f"⚠️ Skipping booking - no pickup location available")
+            return
+    
     if not start_location or not end_location:
         logger.warning(f"⚠️ Could not extract locations for {uid}")
         return
@@ -812,8 +836,13 @@ async def webhook(request: Request):
     Receive voice transcripts from Omi.
     Collect segments for 5 seconds, then process if trigger detected.
     Always uses default_user.
+    Extracts phone's IP address from request for geolocation.
     """
     try:
+        # Extract phone's IP address from request
+        phone_ip = request.client.host if request.client else None
+        logger.info(f"📱 Webhook received from IP: {phone_ip}")
+        
         # Handle both Pydantic model and raw JSON/streaming data
         try:
             body = await request.json()
@@ -825,6 +854,17 @@ async def webhook(request: Request):
         # Always use default_user
         uid = "default_user"
         segments = body.get("segments", [])
+        
+        # Optional: Extract GPS coordinates if provided in webhook
+        gps_lat = body.get("gps_lat")
+        gps_lon = body.get("gps_lon")
+        if gps_lat and gps_lon:
+            logger.info(f"📍 GPS coordinates provided: ({gps_lat}, {gps_lon})")
+        
+        # Store phone IP in request context for later use
+        request.state.phone_ip = phone_ip
+        request.state.gps_lat = gps_lat
+        request.state.gps_lon = gps_lon
         
         if not segments:
             logger.error("❌ No segments provided in request")
@@ -848,6 +888,11 @@ async def webhook(request: Request):
         if uid not in segment_buckets:
             segment_buckets[uid] = []
             logger.info(f"🆕 Creating new bucket for {uid}")
+            # Store phone IP for geolocation
+            segment_buckets[f"{uid}_phone_ip"] = phone_ip
+            # Store GPS coordinates if provided
+            segment_buckets[f"{uid}_gps_lat"] = gps_lat
+            segment_buckets[f"{uid}_gps_lon"] = gps_lon
             # Start monitoring task on first segment
             task = asyncio.create_task(_process_bucket_delayed(uid))
             bucket_timers[uid] = task
@@ -883,7 +928,10 @@ async def _book_ride_background(uid: str, start_location: str, end_location: str
         # Get auto_request from environment variable (default: False)
         auto_request_env = os.getenv("AUTO_REQUEST", "false")
         auto_request = auto_request_env.lower() == "true"
-        logger.info(f"AUTO_REQUEST env value: '{auto_request_env}' → auto_request: {auto_request}")
+        logger.info(f"🔧 AUTO_REQUEST configuration:")
+        logger.info(f"   - Environment variable: '{auto_request_env}'")
+        logger.info(f"   - Parsed value: {auto_request}")
+        logger.info(f"   - Auto-request enabled: {'✅ YES' if auto_request else '❌ NO'}")
         success, message, driver_name, eta = await uber_automation.book_ride(
             uid, start_location, end_location, auto_request=auto_request
         )

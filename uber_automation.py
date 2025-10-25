@@ -245,28 +245,29 @@ class UberAutomation:
                     # Fallback to regular click
                     await see_prices_btn.click()
                 
-                # Wait for prices/ride options to load
-                print("Waiting for ride prices to load...")
+                # Wait for new page to load
+                print("⏳ Waiting for new page to load...")
                 try:
-                    # Wait for price elements to appear (max 20 seconds)
-                    await page.wait_for_selector('[data-testid*="price"], [aria-label*="price"], .price', timeout=20000)
-                    print("✅ Prices loaded!")
+                    await page.wait_for_load_state("networkidle", timeout=15000)
+                    print("✅ New page loaded")
                 except:
-                    # If prices don't load, wait a bit more
-                    print("⚠️ Prices not found, waiting 3 more seconds...")
-                    await asyncio.sleep(3)
+                    print("⚠️ Page load timeout, proceeding anyway...")
                 
+                # Wait additional 30 seconds after page loads
+                print("⏳ Waiting 30 seconds after page load...")
+                await asyncio.sleep(30)
+                print("✅ 30 seconds elapsed, taking screenshot")
                 await self._capture_screenshot(page, uid, "06_ride_options")
                 
                 # Look for "Request" or available ride options
                 print(f"auto_request flag: {auto_request}")
-                
+                auto_request = False
                 if not auto_request:
                     # If auto_request is False, just return ready state without clicking anything
                     print("✅ Ride options loaded and ready to request!")
                     return True, f"✅ Ride ready! Pickup: {start_location} → Dropoff: {end_location}. Ready to request (auto_request=False).", None, None
                 
-                if auto_request:
+                else :
                     # First, click on a ride option (e.g., UberX)
                     print("Looking for ride option to select...")
                     ride_option = None
@@ -303,6 +304,11 @@ class UberAutomation:
                             await first_option.evaluate("el => el.click()")
                             await asyncio.sleep(2)
                             await self._capture_screenshot(page, uid, "07_ride_selected")
+                            
+                            # Wait 30 seconds after clicking ride option
+                            print("⏳ Waiting 30 seconds after clicking ride option...")
+                            await asyncio.sleep(30)
+                            print("✅ 30 seconds elapsed, proceeding to request button")
                         else:
                             print("⚠️ No ride options found, proceeding to request button")
                     except Exception as e:
@@ -328,7 +334,11 @@ class UberAutomation:
                             btn_text = await request_btn.text_content()
                             print(f"🚗 Clicking Request button: {btn_text}")
                             await request_btn.evaluate("el => el.click()")
-                            await asyncio.sleep(3)
+                            
+                            # Wait 5 seconds after clicking request button
+                            print("⏳ Waiting 5 seconds after clicking request button...")
+                            await asyncio.sleep(5)
+                            print("✅ 5 seconds elapsed, taking screenshot")
                             await self._capture_screenshot(page, uid, "08_booking_confirmation")
                             
                             print("✅ Ride booked successfully!")
