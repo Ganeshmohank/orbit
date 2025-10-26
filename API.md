@@ -329,7 +329,7 @@ curl http://localhost:8000/health
 ## Rate Limiting
 
 - **2FA attempts:** 3 per session
-- **Bookings:** 1 per 30 seconds per user
+- **Bookings:** 1 per 15 seconds per user
 - **Webhook:** No limit (non-blocking)
 
 ---

@@ -47,8 +47,8 @@ async def get_nearest_landmark(lat: float, lon: float) -> Optional[str]:
     """
     # Hardcoded landmarks for known coordinates
     LANDMARK_FALLBACKS = {
-        (37.7749, -122.4194): "Ferry Building",  # San Francisco downtown
-        (37.802087, -122.448663): "Palace of Fine Arts",  # Palace of Fine Arts
+        (37.7749, -122.4194): "San Pedro Square",  # San Francisco downtown
+        (37.802087, -122.448663): "77 N alamden ave",  # Palace of Fine Arts
     }
     
     # Check if coordinates match known locations (with small tolerance)
@@ -60,8 +60,8 @@ async def get_nearest_landmark(lat: float, lon: float) -> Optional[str]:
             return landmark
     
     # Default fallback to Palace of Fine Arts
-    print(f"🏛️ Using default landmark: Palace of Fine Arts")
-    return "Palace of Fine Arts"
+    print(f"🏛️ Using default landmark: 77 N alamden ave")
+    return "77 N alamden ave"
 
 
 async def get_pickup_location_from_ip(ip_address: Optional[str] = None, gps_lat: Optional[float] = None, gps_lon: Optional[float] = None) -> Optional[str]:

@@ -30,7 +30,7 @@ app = FastAPI(title="Omi Uber App", version="1.0.0")
 
 # Rate limiting to prevent bombarding Uber
 last_booking_time = {}
-MIN_BOOKING_INTERVAL = 30  # Minimum 30 seconds between bookings per user
+MIN_BOOKING_INTERVAL = 30  # Minimum 15 seconds between bookings per user
 
 # Active bookings - only 1 per user
 active_bookings = {}  # {uid: bool}

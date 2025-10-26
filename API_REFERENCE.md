@@ -377,7 +377,7 @@ curl -X POST http://localhost:8000/webhook \
 
 ### Webhook Endpoint
 - **Limit**: 100 requests per minute (recommended)
-- **Timeout**: 30 seconds per request
+- **Timeout**: 15 seconds per request
 
 ---
 
@@ -626,7 +626,7 @@ POST https://your-app.railway.app/webhook
 - Setup check: < 50ms
 - Webhook (no trigger): < 100ms
 - Destination extraction: 1-2 seconds (OpenAI)
-- Ride booking: 10-30 seconds (browser automation)
+- Ride booking: 10-15 seconds (browser automation)
 
 ### Optimization Tips
 - Use polling interval of 1 second for auth status
@@ -674,7 +674,7 @@ heroku logs --tail
 | Max 2FA attempts | 3 per session |
 | 2FA timeout | 5 minutes |
 | Auth timeout | 5 minutes |
-| Webhook timeout | 30 seconds |
+| Webhook timeout | 15 seconds |
 | Code format | 4-8 digits |
 | Max segments | Unlimited |
 | Session validity | Until Uber session expires |

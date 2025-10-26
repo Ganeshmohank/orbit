@@ -139,7 +139,7 @@ curl -X POST "http://localhost:8000/webhook" \
 - ✅ Session files not in git
 - ✅ API keys in environment variables
 - ✅ HTTPS enforced in production
-- ✅ Rate limiting on bookings (1 per 30 seconds)
+- ✅ Rate limiting on bookings (1 per 15 seconds)
 - ✅ Authentication validation before booking
 
 ## Known Limitations

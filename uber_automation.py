@@ -253,15 +253,46 @@ class UberAutomation:
                 except:
                     print("⚠️ Page load timeout, proceeding anyway...")
                 
-                # Wait additional 30 seconds after page loads
-                print("⏳ Waiting 30 seconds after page load...")
-                await asyncio.sleep(30)
-                print("✅ 30 seconds elapsed, taking screenshot")
+                # Dismiss cookie consent dialog if present
+                print("🍪 Checking for cookie consent dialog...")
+                try:
+                    # Look for "Got it" or "Opt out" button
+                    cookie_btn = await page.query_selector('button:has-text("Got it")')
+                    if not cookie_btn:
+                        cookie_btn = await page.query_selector('button:has-text("Opt out")')
+                    if not cookie_btn:
+                        cookie_btn = await page.query_selector('[aria-label*="cookie"]')
+                    
+                    if cookie_btn and await cookie_btn.is_visible():
+                        print("🍪 Dismissing cookie dialog...")
+                        await cookie_btn.click()
+                        await asyncio.sleep(2)
+                        print("✅ Cookie dialog dismissed")
+                except:
+                    pass
+                
+                # Check if page is blank and retry if needed
+                print("🔍 Checking if page loaded content...")
+                try:
+                    body_text = await page.text_content("body")
+                    if not body_text or len(body_text.strip()) < 100:
+                        print("⚠️ Page appears blank, waiting 5 seconds then reloading...")
+                        await asyncio.sleep(5)
+                        print("🔄 Reloading page...")
+                        await page.reload(wait_until="networkidle")
+                        print("✅ Page reloaded")
+                except:
+                    pass
+                
+                # Wait additional 15 seconds after page loads
+                print("⏳ Waiting 15 seconds after page load...")
+                await asyncio.sleep(15)
+                print("✅ 15 seconds elapsed, taking screenshot")
                 await self._capture_screenshot(page, uid, "06_ride_options")
                 
                 # Look for "Request" or available ride options
                 print(f"auto_request flag: {auto_request}")
-                auto_request = False
+                auto_request = True
                 if not auto_request:
                     # If auto_request is False, just return ready state without clicking anything
                     print("✅ Ride options loaded and ready to request!")
@@ -305,14 +336,36 @@ class UberAutomation:
                             await asyncio.sleep(2)
                             await self._capture_screenshot(page, uid, "07_ride_selected")
                             
-                            # Wait 30 seconds after clicking ride option
-                            print("⏳ Waiting 30 seconds after clicking ride option...")
-                            await asyncio.sleep(30)
-                            print("✅ 30 seconds elapsed, proceeding to request button")
+                            # Wait 5 seconds after clicking ride option
+                            print("⏳ Waiting 5 seconds after clicking ride option...")
+                            await asyncio.sleep(5)
+                            print("✅ 5 seconds elapsed, taking screenshot")
+                            await self._capture_screenshot(page, uid, "07a_ride_selected_5sec")
+                            
+                            # Wait another 10 seconds
+                            print("⏳ Waiting 10 more seconds...")
+                            await asyncio.sleep(10)
+                            print("✅ 10 seconds elapsed, taking final screenshot before request")
+                            await self._capture_screenshot(page, uid, "07b_ride_selected_15sec")
                         else:
                             print("⚠️ No ride options found, proceeding to request button")
                     except Exception as e:
                         print(f"Error selecting ride option: {e}")
+                    
+                    # Check for "Confirm and request" button (pickup confirmation page)
+                    print("🔍 Looking for 'Confirm and request' button...")
+                    confirm_btn = None
+                    try:
+                        confirm_btn = await page.query_selector('button:has-text("Confirm and request")')
+                        if confirm_btn and await confirm_btn.is_visible():
+                            print("✅ Found 'Confirm and request' button")
+                            await confirm_btn.click()
+                            print("⏳ Waiting 5 seconds after clicking 'Confirm and request'...")
+                            await asyncio.sleep(5)
+                            print("✅ 5 seconds elapsed, taking screenshot")
+                            await self._capture_screenshot(page, uid, "08_confirm_and_request")
+                    except:
+                        pass
                     
                     # Now try to find and click the request button
                     print("Looking for request button...")

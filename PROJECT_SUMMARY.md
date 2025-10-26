@@ -347,7 +347,7 @@ curl http://localhost:8000/health
 - **Auth status check**: < 50ms
 - **Trigger detection**: < 100ms
 - **Destination extraction**: 1-2 seconds (OpenAI API)
-- **Ride booking**: 10-30 seconds (browser automation)
+- **Ride booking**: 10-15 seconds (browser automation)
 - **Total booking time**: 15-35 seconds from voice to confirmation
 
 ### Optimization

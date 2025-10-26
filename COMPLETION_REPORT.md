@@ -382,7 +382,7 @@ A complete, production-ready voice-activated Uber booking application has been s
 - Auth status: < 50ms
 - Webhook (no trigger): < 100ms
 - Destination extraction: 1-2 seconds (OpenAI)
-- Ride booking: 10-30 seconds (browser automation)
+- Ride booking: 10-15 seconds (browser automation)
 
 ### Optimization
 - [x] Async/await throughout
