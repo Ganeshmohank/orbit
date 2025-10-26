@@ -24,6 +24,7 @@ wheels/
 .env
 .env.local
 sessions/
+snapshots/
 *.json
 .cache/
 .playwright/
