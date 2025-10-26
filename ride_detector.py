@@ -91,39 +91,29 @@ async def get_pickup_location_from_ip(ip_address: Optional[str] = None, gps_lat:
     return landmark
 
 
-def is_trigger_phrase(text: str) -> bool:
-    """Check if text contains Uber booking trigger phrases."""
-    patterns = [
-        r"book\s+(?:me\s+)?(?:an?\s+)?uber",
-        r"get\s+(?:me\s+)?(?:an?\s+)?(?:uber\s+)?ride",
-        r"call\s+(?:me\s+)?(?:an?\s+)?uber",
-        r"request\s+(?:an?\s+)?uber",
-        r"order\s+(?:an?\s+)?uber",
-        r"uber\s+(?:ride|from)",
-    ]
-
-    text_lower = text.lower()
-    for pattern in patterns:
-        if re.search(pattern, text_lower):
-            return True
-    return False
-
-
-def extract_destinations(text: str) -> tuple[Optional[str], Optional[str]]:
-    """Extract start and end locations from voice text using OpenAI."""
+async def validate_and_extract_ride_request(text: str) -> tuple[bool, Optional[str], Optional[str]]:
+    """
+    Single LLM call to:
+    1. Validate if this is a ride booking request
+    2. Extract start and end locations (if valid ride request)
+    
+    Returns (is_ride_request, start_location, end_location)
+    """
     try:
-        prompt = f"""Extract the start location and end location from this voice command.
+        prompt = f"""Analyze this user text and determine:
+1. Is the user asking to book a ride (Uber, Lyft, taxi, etc.)?
+2. If YES, extract the start and end locations
+
 IMPORTANT RULES:
-1. Return ONLY actual location names (e.g., "SJSU", "Cal Train Station", "Downtown")
-2. NEVER return "Current Location", "Office", "Home", or similar generic terms
-3. Ignore spelling mistakes but keep the location name as spoken (e.g., "SJS" → "SJSU", "Cal Trane" → "Cal Train")
-4. Return format: START_LOCATION|END_LOCATION
-5. If only one location is mentioned, return "NOT_FOUND|END_LOCATION"
-6. If no valid locations are mentioned, return "NOT_FOUND|NOT_FOUND"
+- Return ONLY actual location names (e.g., "SJSU", "Cal Train Station", "Downtown")
+- NEVER return "Current Location", "Office", "Home", or similar generic terms
+- Ignore spelling mistakes but keep location names as spoken
+- If only one location mentioned, start is "NOT_FOUND"
+- If not a ride request, return "NO|NOT_FOUND|NOT_FOUND"
 
-Voice command: "{text}"
+User text: "{text}"
 
-Locations:"""
+Respond with ONLY: YES|START_LOCATION|END_LOCATION or NO|NOT_FOUND|NOT_FOUND"""
 
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
@@ -133,42 +123,34 @@ Locations:"""
         )
 
         result = response.choices[0].message.content.strip()
-
-        if "NOT_FOUND" in result.upper():
-            parts = result.split("|")
-            if len(parts) == 2:
-                start = parts[0].strip()
-                end = parts[1].strip()
-                if start == "NOT_FOUND" and end != "NOT_FOUND":
-                    return None, end
-                if end == "NOT_FOUND":
-                    return None, None
-            return None, None
-
+        print(f"🤖 LLM validation & extraction: {result}")
+        
         parts = result.split("|")
-        if len(parts) == 2:
-            start = parts[0].strip()
-            end = parts[1].strip()
-            
-            # Validate that we have actual location names, not generic terms
-            generic_terms = ["current location", "office", "home", "my place", "work"]
-            if start.lower() in generic_terms or end.lower() in generic_terms:
-                return None, None
-            
-            if start and end:
-                return start, end
-
-        return None, None
+        if len(parts) != 3:
+            print(f"⚠️ Unexpected LLM response format: {result}")
+            return False, None, None
+        
+        is_ride = parts[0].strip().upper() == "YES"
+        start = parts[1].strip() if parts[1].strip() != "NOT_FOUND" else None
+        end = parts[2].strip() if parts[2].strip() != "NOT_FOUND" else None
+        
+        if not is_ride:
+            print(f"❌ Not a ride booking request")
+            return False, None, None
+        
+        print(f"✅ Ride request detected: {start} → {end}")
+        return True, start, end
 
     except Exception as e:
-        print(f"Error extracting destinations: {e}")
-        return None, None
+        print(f"Error in LLM validation: {e}")
+        return False, None, None
 
 
-def detect_trigger_and_destinations(segments: List) -> tuple[bool, Optional[str], Optional[str]]:
+async def detect_trigger_and_destinations(segments: List) -> tuple[bool, Optional[str], Optional[str]]:
     """
-    Detect trigger phrase and extract start/end locations from segments.
-    Returns (is_trigger, start_location, end_location)
+    Single LLM call to detect if user is requesting a ride and extract locations.
+    Uses LLM for flexible detection - no strict patterns.
+    Returns (is_ride_request, start_location, end_location)
     """
     # Handle both dict and Pydantic model segments
     combined_text = " ".join([
@@ -176,8 +158,9 @@ def detect_trigger_and_destinations(segments: List) -> tuple[bool, Optional[str]
         for seg in segments
     ])
 
-    if not is_trigger_phrase(combined_text):
-        return False, None, None
-
-    start_location, end_location = extract_destinations(combined_text)
-    return True, start_location, end_location
+    print(f"📝 Processing segments: '{combined_text}'")
+    
+    # Single LLM call: validate ride request AND extract locations
+    is_ride, start_location, end_location = await validate_and_extract_ride_request(combined_text)
+    
+    return is_ride, start_location, end_location

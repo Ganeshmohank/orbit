@@ -667,11 +667,11 @@ async def _process_booking(uid: str, segments: list, background_tasks: Backgroun
     combined_text = " ".join([seg.get("text", "") if isinstance(seg, dict) else seg.text for seg in segments])
     logger.info(f"✅ Joined text: '{combined_text}'")
     
-    # Detect trigger phrase and extract locations
-    is_trigger, start_location, end_location = detect_trigger_and_destinations(segments)
+    # Detect trigger phrase and extract locations (using LLM, no strict patterns)
+    is_trigger, start_location, end_location = await detect_trigger_and_destinations(segments)
     
     if not is_trigger:
-        logger.info(f"❌ No trigger phrase detected for {uid}")
+        logger.info(f"❌ LLM determined this is not a ride booking request for {uid}")
         active_bookings[uid] = False
         return
     
@@ -756,11 +756,11 @@ async def _process_bucket_delayed(uid: str):
     combined_text = " ".join([seg.get("text", "") if isinstance(seg, dict) else seg.text for seg in segments])
     logger.info(f"✅ Joined text: '{combined_text}'")
     
-    # Detect trigger phrase and extract locations
-    is_trigger, start_location, end_location = detect_trigger_and_destinations(segments)
+    # Detect trigger phrase and extract locations (using LLM, no strict patterns)
+    is_trigger, start_location, end_location = await detect_trigger_and_destinations(segments)
     
     if not is_trigger:
-        logger.info(f"❌ No trigger phrase detected for {uid}")
+        logger.info(f"❌ LLM determined this is not a ride booking request for {uid}")
         return
     
     logger.info(f"✅ LLM validation passed for {uid}: {start_location} → {end_location}")
