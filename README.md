@@ -225,12 +225,12 @@ Confirmation sent back to Omi
 
 For detailed architecture and system design documentation, see:
 
-- **START_HERE.md** - Quick start guide with system overview and architecture diagrams
-- **ARCHITECTURE_UNIVERSE.md** - Complete system architecture and data flow
-- **ARCHITECTURE_OMI.md** - Voice entry point (Omi device) documentation
-- **ARCHITECTURE_NEXUS.md** - Middleware brain (Nexus agent) documentation
-- **ARCHITECTURE_MCP.md** - Service integrations (Jira MCP, Google Calendar MCP, Uber Service)
-- **ARCHITECTURE_GUIDE.md** - Navigation guide for all architecture documentation
+- **documentation/START_HERE.md** - Quick start guide with system overview and architecture diagrams
+- **documentation/architectures/ARCHITECTURE_UNIVERSE.md** - Complete system architecture and data flow
+- **documentation/architectures/ARCHITECTURE_OMI.md** - Voice entry point (Omi device) documentation
+- **documentation/architectures/ARCHITECTURE_NEXUS.md** - Middleware brain (Nexus agent) documentation
+- **documentation/architectures/ARCHITECTURE_MCP.md** - Service integrations (Jira MCP, Google Calendar MCP, Uber Service)
+- **documentation/architectures/ARCHITECTURE_GUIDE.md** - Navigation guide for all architecture documentation
 
 ## Nexus Agent (Middleware)
 
