@@ -301,8 +301,18 @@ flake8 *.py
 
 ## License
 
-MIT License - feel free to use and modify
+Proprietary License - Approval Required
+
+This project is proprietary and requires explicit written approval from the author before use, modification, or distribution.
+
+**To request approval:**
+- Email: mohankancherla519@gmail.com
+- Phone: +1 6693257754
+- Include: Project details, intended use case, and timeline
+- Wait for written approval before proceeding
+
+Unauthorized use, modification, or distribution is prohibited.
 
 ---
 
-**Built with ❤️ for voice-activated productivity**
+**Built for enterprise workflow automation**
